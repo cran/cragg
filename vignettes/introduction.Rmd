@@ -1,0 +1,174 @@
+---
+title: "Using Cragg"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Using Cragg}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+## Introduction
+This vignette teaches you how to use the Cragg package to perform the Cragg-Donald (1993) and Stock and Yogo (2005) tests for weak instruments.
+Skip to "Testing for Weak Instruments" if you would just like to see example syntax and interpretation.
+
+## Notation
+
+I use the following notation to describe the instrumental variables model:
+$$ Y_i = \beta_0 + \beta_1D_{1i} + \beta_2D_{2i} + \beta_3X_{1i} +\beta_4X_{2i} + \varepsilon_i $$
+
+Where
+
+* $Y$ is the outcome of interest / dependent variable
+
+* $X_1$ and $X_2$ are control variables
+
+* $D_1$ and $D_2$ are the endogenous variables / treatments and are instrumented by $Z_1$ , $Z_2$ , $Z_3$, and $Z_4$
+
+An assumption of instrumental variables analysis is that the instruments have a strong influence on the treatments / endogenous variables we are examining. If this is not the case, then IV estimators become unreliable.
+
+
+## Generating the Data
+In this vignette I will show the output of the functions in the cragg package when instruments are both strong and weak. To do this, I artificially create a pool of data in which the instruments strongly influence the treatment variables and another dataset which is just random data.
+
+I first create a covariance matrix for a situation in which the instruments ($Z_1$ , $Z_2$ , $Z_3$, and $Z_4$) strongly influence the treatments ($D_1$ and $D_2$)
+```{r}
+strong_cov_mat <- matrix(
+	c(
+		 #Y      #X1      #X2      #D1      #D2      #Z1      #Z2      #Z3      #Z4
+		 3.8635,  0.0387,  0.0922,  1.4810,  0.4778,  0.2024,  0.1085,  0.0850, -0.0368,	#Y
+		 0.0387,  0.0832, -0.0029,  0.0415, -0.0014,  0.0025,  0.0009, -0.0004, -0.0058,	#X1
+		 0.0922, -0.0029,  0.0848,  0.0068,  0.0462,  0.0029, -0.0009,  0.0028,  0.0027,	#X2
+		 1.4810,  0.0415,  0.0068,  1.4345,  0.1949,  0.2184,  0.0562,  0.0464, -0.0155,	#D1
+		 0.4778, -0.0014,  0.0462,  0.1949,  0.4042, -0.0034,  0.0909,  0.0875, -0.0079,	#D2
+		 0.2024,  0.0025,  0.0029,  0.2184, -0.0034,  0.0851,  0.0005, -0.0043,  0.0000,	#Z1
+		 0.1085,  0.0009, -0.0009,  0.0562,  0.0909,  0.0005,  0.0840,  0.0074, -0.0096,	#Z2
+		 0.0850, -0.0004,  0.0028,  0.0464,  0.0875, -0.0043,  0.0074,  0.0831, -0.0005,	#Z3
+		-0.0368, -0.0058,  0.0027, -0.0155, -0.0079,  0.0000, -0.0096, -0.0005,  0.0827		#Z4
+		),
+                 ncol = 9)
+```
+
+I then a covariance matrix for a situation in which the instruments ($Z_1$ , $Z_2$ , $Z_3$, and $Z_4$) have no influence on the treatments ($D_1$ and $D_2$) - this covariance matrix calculated from a set of random variables.
+```{r}
+weak_cov_mat <- matrix(
+	c(
+		# Y        X1       X2       D1       D2       Z1       Z2       Z3       Z4
+		  0.0795,  0.0009, -0.0003, -0.0022,  0.0053,  0.0003, -0.0009,  0.0002,  0.0010,	#Y
+		  0.0009,  0.0832, -0.0029,  0.0020, -0.0036,  0.0025,  0.0009, -0.0004, -0.0058,	#X1
+		 -0.0003, -0.0029,  0.0848,  0.0035,  0.0040,  0.0029, -0.0009,  0.0028,  0.0027,	#X2
+		 -0.0022,  0.0020,  0.0035,  0.0866, -0.0027,  0.0001,  0.0030, -0.0013, -0.0041,	#D1
+		  0.0053, -0.0036,  0.0040, -0.0027,  0.0840, -0.0037,  0.0020, -0.0002, -0.0068,	#D2
+		  0.0003,  0.0025,  0.0029,  0.0001, -0.0037,  0.0851,  0.0005, -0.0043,  0.0000,	#Z1
+		 -0.0009,  0.0009, -0.0009,  0.0030,  0.0020,  0.0005,  0.0840,  0.0074, -0.0096,	#Z2
+		  0.0002, -0.0004,  0.0028, -0.0013, -0.0002, -0.0043,  0.0074,  0.0831, -0.0005,	#Z3
+		  0.0010, -0.0058,  0.0027, -0.0041, -0.0068,  0.0000, -0.0096, -0.0005,  0.0827	#Z4
+		),
+                 ncol = 9)
+
+```
+
+I then use these covariance matrices to generate a dataset with strong instruments, `strong_instrument_data`, and a dataset with completely ineffectual instruments, `weak_instrument_data`.
+
+```{r}
+library(MASS)
+set.seed(42)
+
+mu <- rep(0,9)
+stddev <- rep(1,9)
+strong_instrument_data <- as.data.frame(MASS::mvrnorm(n = 250, mu = mu, Sigma = strong_cov_mat, empirical = FALSE))
+names(strong_instrument_data) <- c("Y", "X1", "X2","D1","D2","Z1","Z2","Z3","Z4")
+weak_instrument_data <- as.data.frame(MASS::mvrnorm(n = 250, mu = mu, Sigma = weak_cov_mat, empirical = FALSE))
+names(weak_instrument_data) <- c("Y", "X1", "X2","D1","D2","Z1","Z2","Z3","Z4")
+
+```
+
+## Testing for Weak Instruments
+With the datasets generated, we can now move on to testing for the presence of weak instruments.
+The cragg package offers two main functions to do this: `cragg_donald()`, and `stock_yogo_test`.
+
+`cragg_donald()` implements the calculation for the Cragg-Donald statistic (1993), which can be thought of as the matrix-analogue of the first stage F-statistic.
+
+`stock_yogo_test()` implements the Stock and Yogo (2005) test for weak instruments. The Stock and Yogo test uses the Cragg-Daniels statistic and a set of precalculated critical values to ensure that the bias is less than 5, 10, or 30 percent  of the worst-case error from OLS.
+
+### Cragg-Donald Statistic
+I demonstrate how to calculate the Cragg-Donald statistic for a specific model using the `cragg_donald()` function below.
+The function takes three right-sided formulas as arguments for the control, treatment and instruments. These can be given as either formulas of variable names, or as vectors.
+The function takes an additional data argument which can be a data frame, list, or environment where the variables can be found.
+If the variables cannot be found in the object given, the function may look upwards to see if it can find the objects in the global environment, but this is not recommended and is not guaranteed to work.
+
+Here, I calculate the Cragg-Donald statistic for the dataset with strong instruments.
+I pass the function the names of the control, treatment, and instrumental variables; and the name of the dataframe where the variables can be found.
+```{r}
+library(cragg)
+cragg_donald(X=~X1 + X2, # Control Variables
+			 D=~D1 + D2, # Treatments
+			 Z=~Z1+Z2+Z3+Z4,# Instruments
+			 data = strong_instrument_data)
+```
+This test gives a large CD-statistic which is safely large enough to conclude the instruments are strong.
+However, A more substantial claim can be made by using the critical values for this test created by Stock and Yogo (2005).
+The process for using the stock and Yogo test is described below.
+
+### The Stock and Yogo Test
+The Stock and Yogo test provides critical values for the Cragg-Daniels statistic.
+These tests define weak instruments as when the bias from TSLS is greater than 5, 10, 20 or 30% of the bias of OLS, depending on the acceptable bias threshold [Andrews_2019].
+The tests then reject if the 95% confidence interval excludes this possibility and fail to reject if the potential for this level of bias is not excluded by the confidence interval.
+
+The null hypothesis ($H_0$) is that the instruments are weak, and the alternative hypothesis is that they are not ($H_1$)
+
+To calculate this test using the cragg package, the `stock_yogo_test()` function is used.
+The interface is the same as that for the `cragg_donald` function described above, but it can take an optional parameter to specify the largest acceptable level of bias.
+The function can also take a `size_bias` parameter which can be set from the default `bias` option to `size` in order to use an alternative definition for bias based on the size of the largest allowable t-test distortion.
+
+I run this test on the dataset with the strong instruments and obtain the same Cragg-Donald statistic as above - 40.76.
+```{r}
+stock_yogo_test(X=~X1+X2 , # Control Variables
+			 D=~D1 + D2 , # Treatments
+			 Z=~Z1+Z2+Z3+Z4 ,# Instruments
+			 size_bias="bias", #Default
+			 B=.05, #Default
+			 data = strong_instrument_data)
+```
+We can see that this is significantly higher than the critical value of 11.04, so we have sufficient statistical evidence to reject the null hypothesis that instruments are weak.
+
+As a demonstration, I run this test on the data with completely weak instruments.
+
+```{r}
+stock_yogo_test(X=~X1+X2 , # Control Variables
+			 D=~D1 + D2 , # Treatments
+			 Z=~Z1+Z2+Z3+Z4 ,# Instruments
+			 size_bias="bias", #Default
+			 B=.05, #Default
+			 data = weak_instrument_data)
+```
+A Cragg-Donald statistic of .12 is significantly lower than the critical value of 11.04.
+As such, there is not sufficient evidence to reject the null hypothesis that the instruments are weak in this case.
+
+# References
+
+<div id="refs" class="references csl-bib-body hanging-indent">
+
+<div id="ref-Cragg_1993" class="csl-entry">
+
+Cragg, John G., and Stephen G. Donald. 1993. “Testing Identifiability
+and Specification in Instrumental Variable Models.” *Econometric Theory*
+9 (2): 222–40. <https://doi.org/10.1017/s0266466600007519>.
+
+</div>
+
+<div id="ref-Stock_2005" class="csl-entry">
+
+Stock, James H., and Motohiro Yogo. 2005. “Testing for Weak Instruments
+in Linear IV Regression.” In *Identification and Inference for
+Econometric Models*, 80–108. Cambridge University Press.
+<https://doi.org/10.1017/cbo9780511614491.006>.
+
+</div>
+
+</div>
